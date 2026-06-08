@@ -80,7 +80,7 @@ layout: statement
 Let's start from trivial.
 
 ```docker {none|1|3|4|all}
-FROM bellsoft/liberica-runtime-container:jdk-25-musl
+FROM bellsoft/liberica-runtime-container:jdk-26-musl
 
 COPY . /app
 RUN cd /app && ./gradlew build
@@ -114,7 +114,7 @@ RUN rm -rf /app
 # Our `Dockerfile`
 
 ```docker {1|3|4|5}
-FROM bellsoft/liberica-runtime-container:jdk-25-musl
+FROM bellsoft/liberica-runtime-container:jdk-26-musl
 
 COPY . /app
 RUN cd /app && ./gradlew build
@@ -127,36 +127,37 @@ ENTRYPOINT java -jar /app/build/libs/spring-petclinic*.jar
 
 ```text {all|3|4|5}{maxHeight:'300px'}
 Cmp   Size  Command
-     10 MB  FROM blobs
-    109 MB  cd /app && ./gradlew build -xtest
-     85 MB  (missing)
-    591 MB  (missing)
+    8.6 MB  FROM blobs
+    112 MB  RUN /bin/sh -c cd /app && ./gradlew build # buildkit
+     88 MB  [2/3] COPY spring-petclinic /app
+    580 MB  mount / from exec /bin/sh -c cd /app && ./gradlew build
 ```
 
-<span v-click="1">109 MB of Java</span>
+<span v-click="1">112 MB of Java</span>
 
-<span v-click="2">85 MB of the app</span>
+<span v-click="2">88 MB of the app</span>
 
-<span v-click="3">591 MB of Java build caches</span>
+<span v-click="3">580 MB of Gradle build caches</span>
 
----
-layout: two-cols-header
 ---
 
 # 600+ MB are changed on every build!
 
-::left::
+<div class="flex gap-8 items-start">
+<div class="flex-1">
 
 Why do we care? We care because:
 
-1. `push` takes a longer time to start <br/>(update is longer)
-2. `pull` takes longer <br/> (update takes longer & scaling takes longer)
+1. `push` takes a longer time to start (update is longer)
+2. `pull` takes longer (update takes longer & scaling takes longer)
 
 Also, more disk space is inefficiently used
 
-::right::
+</div>
 
-<img src="/clocks.png" class="max-h-330px rounded self-center">
+<img src="/clocks.png" class="max-h-330px max-w-160px object-contain rounded flex-shrink-0">
+
+</div>
 
 ---
 
@@ -166,16 +167,16 @@ Let's build it outside of container
 
 ````md magic-move
 ```docker {3-5}
-FROM bellsoft/liberica-runtime-container:jdk-25-musl
+FROM bellsoft/liberica-runtime-container:jdk-26-musl
 
 COPY . /app
 RUN cd /app && ./gradlew build
 ENTRYPOINT java -jar /app/build/libs/spring-petclinic*.jar
 ```
 ```docker {3-4|all}
-FROM bellsoft/liberica-runtime-container:jdk-25-musl
+FROM bellsoft/liberica-runtime-container:jdk-26-musl
 
-COPY build/libs/spring-petclinic-3.3.0.jar /app/app.jar
+COPY build/libs/spring-petclinic-4.0.0-SNAPSHOT.jar /app/app.jar
 CMD java -jar /app/app.jar
 ```
 ````
@@ -196,11 +197,12 @@ Cmp   Size  Command
 ```
 ```plain{4}
 Cmp   Size  Command
-     10 MB  FROM blobs
-    109 MB  (missing)
-     69 MB  (missing)
+    8.6 MB  FROM blobs
+    112 MB  pulled from docker.io/bellsoft/liberica-runtime-container:jdk-26-musl@sh
+     70 MB  [2/2] COPY spring-petclinic/build/libs/spring-petclinic-4.0.0-SNAPSHOT.j
 ```
 ````
+
 
 No Gradle caches and build dir!
 
@@ -216,7 +218,7 @@ layout: statement
 
 ---
 layout: cover
-background: cover2.png
+background: /cover2.png
 ---
 
 # Enter build stages
@@ -236,14 +238,14 @@ Holy grail of pure builds
 # Staged example
 
 ```docker {none|1|3|4|6|8}
-FROM bellsoft/liberica-runtime-container:jdk-25-musl as builder
+FROM bellsoft/liberica-runtime-container:jdk-26-musl as builder
 
 COPY . /app
 RUN cd /app && ./gradlew build -xtest
 
-FROM bellsoft/liberica-runtime-container:jre-25-musl as runner
+FROM bellsoft/liberica-runtime-container:jre-26-musl as runner
 
-COPY --from=builder /app/build/libs/spring-petclinic-3.3.0.jar /app/app.jar
+COPY --from=builder /app/build/libs/spring-petclinic-4.0.0-SNAPSHOT.jar /app/app.jar
 ```
 
 ---
@@ -277,18 +279,18 @@ Is there a way to optimize it?
 # Layers!
 
 ```docker {1-4|6|8,9|10|12,6|15-18|14}{maxHeight:'180px'}
-FROM bellsoft/liberica-runtime-container:jdk-musl as builder
+FROM bellsoft/liberica-runtime-container:jdk-26-musl as builder
 
 COPY . /app
 RUN cd /app && ./gradlew build -xtest
 
-FROM bellsoft/liberica-runtime-container:jre-slim-musl as optimizer
+FROM bellsoft/liberica-runtime-container:jre-26-slim-musl as optimizer
 
-COPY --from=builder /app/build/libs/spring-petclinic-3.3.0.jar /app/app.jar
+COPY --from=builder /app/build/libs/spring-petclinic-4.0.0-SNAPSHOT.jar /app/app.jar
 WORKDIR /app
 RUN java -Djarmode=tools -jar /app/app.jar extract --layers --destination extracted
 
-FROM bellsoft/liberica-runtime-container:jre-slim-musl as runner
+FROM bellsoft/liberica-runtime-container:jre-26-slim-musl as runner
 
 ENTRYPOINT ["java", "-jar", "./app/spring-petclinic.jar"]
 COPY --from=optimizer /app/extracted/dependencies/ ./
@@ -351,7 +353,7 @@ extracted
 │       ├── checker-qual-3.49.3.jar
 │       ├── classmate-1.7.0.jar
 │       ├── commons-logging-1.3.5.jar
-│       ├── context-propagation-1.2.0-M1.jar
+│       ├── context-propagation-1.2.0.jar
 │       ├── error_prone_annotations-2.40.0.jar
 │       ├── font-awesome-4.7.0.jar
 │       ├── h2-2.3.232.jar
@@ -361,9 +363,9 @@ extracted
 │       ├── hibernate-validator-9.0.1.Final.jar
 │       ├── HikariCP-7.0.2.jar
 │       ├── istack-commons-runtime-4.1.2.jar
-│       ├── jackson-annotations-2.20.jar
-│       ├── jackson-core-3.0.0-rc9.jar
-│       ├── jackson-databind-3.0.0-rc9.jar
+│       ├── jackson-annotations-2.20.1.jar
+│       ├── jackson-core-3.0.2.jar
+│       ├── jackson-databind-3.0.2.jar
 │       ├── jakarta.activation-api-2.1.4.jar
 │       ├── jakarta.annotation-api-3.0.0.jar
 │       ├── jakarta.inject-api-2.0.1.jar
@@ -381,59 +383,59 @@ extracted
 │       ├── log4j-to-slf4j-2.24.3.jar
 │       ├── logback-classic-1.5.18.jar
 │       ├── logback-core-1.5.18.jar
-│       ├── micrometer-commons-1.16.0-M3.jar
-│       ├── micrometer-core-1.16.0-M3.jar
-│       ├── micrometer-jakarta9-1.16.0-M3.jar
-│       ├── micrometer-observation-1.16.0-M3.jar
-│       ├── micrometer-tracing-1.6.0-M3.jar
+│       ├── micrometer-commons-1.16.0.jar
+│       ├── micrometer-core-1.16.0.jar
+│       ├── micrometer-jakarta9-1.16.0.jar
+│       ├── micrometer-observation-1.16.0.jar
+│       ├── micrometer-tracing-1.6.0.jar
 │       ├── mysql-connector-j-9.4.0.jar
 │       ├── postgresql-42.7.7.jar
 │       ├── slf4j-api-2.0.17.jar
 │       ├── snakeyaml-2.5.jar
-│       ├── spring-aop-7.0.0-M9.jar
-│       ├── spring-aspects-7.0.0-M9.jar
-│       ├── spring-beans-7.0.0-M9.jar
-│       ├── spring-boot-4.0.0-M3.jar
-│       ├── spring-boot-actuator-4.0.0-M3.jar
-│       ├── spring-boot-actuator-autoconfigure-4.0.0-M3.jar
-│       ├── spring-boot-autoconfigure-4.0.0-M3.jar
-│       ├── spring-boot-cache-4.0.0-M3.jar
-│       ├── spring-boot-data-commons-4.0.0-M3.jar
-│       ├── spring-boot-data-jpa-4.0.0-M3.jar
-│       ├── spring-boot-health-4.0.0-M3.jar
-│       ├── spring-boot-hibernate-4.0.0-M3.jar
-│       ├── spring-boot-http-converter-4.0.0-M3.jar
-│       ├── spring-boot-jackson-4.0.0-M3.jar
-│       ├── spring-boot-jdbc-4.0.0-M3.jar
-│       ├── spring-boot-jpa-4.0.0-M3.jar
-│       ├── spring-boot-micrometer-metrics-4.0.0-M3.jar
-│       ├── spring-boot-micrometer-observation-4.0.0-M3.jar
-│       ├── spring-boot-micrometer-tracing-4.0.0-M3.jar
-│       ├── spring-boot-persistence-4.0.0-M3.jar
-│       ├── spring-boot-servlet-4.0.0-M3.jar
-│       ├── spring-boot-sql-4.0.0-M3.jar
-│       ├── spring-boot-thymeleaf-4.0.0-M3.jar
-│       ├── spring-boot-tomcat-4.0.0-M3.jar
-│       ├── spring-boot-tx-4.0.0-M3.jar
-│       ├── spring-boot-validation-4.0.0-M3.jar
-│       ├── spring-boot-webmvc-4.0.0-M3.jar
-│       ├── spring-boot-web-server-4.0.0-M3.jar
-│       ├── spring-context-7.0.0-M9.jar
-│       ├── spring-context-support-7.0.0-M9.jar
-│       ├── spring-core-7.0.0-M9.jar
-│       ├── spring-data-commons-4.0.0-M6.jar
-│       ├── spring-data-jpa-4.0.0-M6.jar
-│       ├── spring-expression-7.0.0-M9.jar
-│       ├── spring-jdbc-7.0.0-M9.jar
-│       ├── spring-orm-7.0.0-M9.jar
-│       ├── spring-tx-7.0.0-M9.jar
-│       ├── spring-web-7.0.0-M9.jar
-│       ├── spring-webmvc-7.0.0-M9.jar
+│       ├── spring-aop-7.0.1.jar
+│       ├── spring-aspects-7.0.1.jar
+│       ├── spring-beans-7.0.1.jar
+│       ├── spring-boot-4.0.0.jar
+│       ├── spring-boot-actuator-4.0.0.jar
+│       ├── spring-boot-actuator-autoconfigure-4.0.0.jar
+│       ├── spring-boot-autoconfigure-4.0.0.jar
+│       ├── spring-boot-cache-4.0.0.jar
+│       ├── spring-boot-data-commons-4.0.0.jar
+│       ├── spring-boot-data-jpa-4.0.0.jar
+│       ├── spring-boot-health-4.0.0.jar
+│       ├── spring-boot-hibernate-4.0.0.jar
+│       ├── spring-boot-http-converter-4.0.0.jar
+│       ├── spring-boot-jackson-4.0.0.jar
+│       ├── spring-boot-jdbc-4.0.0.jar
+│       ├── spring-boot-jpa-4.0.0.jar
+│       ├── spring-boot-micrometer-metrics-4.0.0.jar
+│       ├── spring-boot-micrometer-observation-4.0.0.jar
+│       ├── spring-boot-micrometer-tracing-4.0.0.jar
+│       ├── spring-boot-persistence-4.0.0.jar
+│       ├── spring-boot-servlet-4.0.0.jar
+│       ├── spring-boot-sql-4.0.0.jar
+│       ├── spring-boot-thymeleaf-4.0.0.jar
+│       ├── spring-boot-tomcat-4.0.0.jar
+│       ├── spring-boot-tx-4.0.0.jar
+│       ├── spring-boot-validation-4.0.0.jar
+│       ├── spring-boot-webmvc-4.0.0.jar
+│       ├── spring-boot-web-server-4.0.0.jar
+│       ├── spring-context-7.0.1.jar
+│       ├── spring-context-support-7.0.1.jar
+│       ├── spring-core-7.0.1.jar
+│       ├── spring-data-commons-4.0.0.jar
+│       ├── spring-data-jpa-4.0.0.jar
+│       ├── spring-expression-7.0.1.jar
+│       ├── spring-jdbc-7.0.1.jar
+│       ├── spring-orm-7.0.1.jar
+│       ├── spring-tx-7.0.1.jar
+│       ├── spring-web-7.0.1.jar
+│       ├── spring-webmvc-7.0.1.jar
 │       ├── thymeleaf-3.1.3.RELEASE.jar
 │       ├── thymeleaf-spring6-3.1.3.RELEASE.jar
-│       ├── tomcat-embed-core-11.0.11.jar
-│       ├── tomcat-embed-el-11.0.11.jar
-│       ├── tomcat-embed-websocket-11.0.11.jar
+│       ├── tomcat-embed-core-11.0.14.jar
+│       ├── tomcat-embed-el-11.0.14.jar
+│       ├── tomcat-embed-websocket-11.0.14.jar
 │       ├── txw2-4.0.5.jar
 │       ├── unbescape-1.1.6.RELEASE.jar
 │       └── webjars-locator-lite-1.1.1.jar
@@ -505,7 +507,7 @@ Trivial usage:
 /usr/sbin/pack build petclinic \
   --builder bellsoft/buildpacks.builder:musl \
   --path . \
-  -e BP_JVM_VERSION=21
+  -e BP_JVM_VERSION=26
 ```
 
 ---
@@ -615,18 +617,18 @@ Even more classes!!!
 
 ````md magic-move
 ```docker {all|12}{maxHeight:'100px'}
-FROM bellsoft/liberica-runtime-container:jdk-musl as builder
+FROM bellsoft/liberica-runtime-container:jdk-26-musl as builder
 
 COPY . /app
 RUN cd /app && ./gradlew build -xtest
 
-FROM bellsoft/liberica-runtime-container:jre-slim-musl as optimizer
+FROM bellsoft/liberica-runtime-container:jre-26-slim-musl as optimizer
 
-COPY --from=builder /app/build/libs/spring-petclinic-3.3.0.jar /app/app.jar
+COPY --from=builder /app/build/libs/spring-petclinic-4.0.0-SNAPSHOT.jar /app/app.jar
 WORKDIR /app
 RUN java -Djarmode=tools -jar /app/app.jar extract --layers --launcher
 
-FROM bellsoft/liberica-runtime-container:jre-slim-musl as runner
+FROM bellsoft/liberica-runtime-container:jre-26-slim-musl as runner
 
 ENTRYPOINT ["java", "-jar", "./app/app.jar"]
 COPY --from=optimizer /app/extracted/dependencies/ ./
@@ -635,17 +637,17 @@ COPY --from=optimizer /app/extracted/snapshot-dependencies/ ./
 COPY --from=optimizer /app/extracted/application/ ./
 ```
 ```docker {12|14-17}{maxHeight:'100px'}
-FROM bellsoft/liberica-runtime-container:jdk-musl as builder
+FROM bellsoft/liberica-runtime-container:jdk-26-musl as builder
 
 COPY . /app
 RUN cd /app && ./gradlew build -xtest
 
-FROM bellsoft/liberica-runtime-container:jre-slim-musl as optimizer
+FROM bellsoft/liberica-runtime-container:jre-26-slim-musl as optimizer
 
-COPY --from=builder /app/build/libs/spring-petclinic-3.3.0.jar /app/app.jar
+COPY --from=builder /app/build/libs/spring-petclinic-4.0.0-SNAPSHOT.jar /app/app.jar
 WORKDIR /app
 RUN java -Djarmode=tools -jar /app/app.jar extract --layers --destination extracted
-FROM bellsoft/liberica-runtime-container:jre-cds-slim-musl as runner
+FROM bellsoft/liberica-runtime-container:jre-26-cds-slim-musl as runner
 
 ENTRYPOINT ["java", "-jar", "./app/app.jar"]
 COPY --from=optimizer /app/extracted/dependencies/ ./
@@ -655,7 +657,7 @@ COPY --from=optimizer /app/extracted/application/ ./
 ```
 ```docker {5-8|9-12|4}{maxHeight:'100px'}
 #omitted
-FROM bellsoft/liberica-runtime-container:jre-cds-slim-musl as runner
+FROM bellsoft/liberica-runtime-container:jre-26-cds-slim-musl as runner
 
 ENTRYPOINT ["java", "-jar", "app.jar"]
 COPY --from=optimizer /app/extracted/dependencies/ ./
@@ -669,7 +671,7 @@ RUN java -Dspring.aot.enabled=true \
 ```
 ```docker {4-7|all|2}{maxHeight:'100px'}
 #omitted
-FROM bellsoft/liberica-runtime-container:jre-cds-slim-musl as runner
+FROM bellsoft/liberica-runtime-container:jre-26-cds-slim-musl as runner
 
 ENTRYPOINT ["java", \
             "-Dspring.aot.enabled=true", \
@@ -686,7 +688,7 @@ RUN java -Dspring.aot.enabled=true \
 ```
 ```docker {2|12-15|13|4-7|6|all}{maxHeight:'100px'}
 #omitted
-FROM bellsoft/liberica-runtime-container:jre-slim-musl as runner
+FROM bellsoft/liberica-runtime-container:jre-26-slim-musl as runner
 
 ENTRYPOINT ["java", \
             "-Dspring.aot.enabled=true", \
@@ -735,18 +737,18 @@ https://openjdk.org/projects/crac/
 # In a perfect world it should be:
 
 ```docker {6,12|9,10|14-16}
-FROM bellsoft/liberica-runtime-container:jdk-musl as builder
+FROM bellsoft/liberica-runtime-container:jdk-26-musl as builder
 
 COPY . /app
 RUN cd /app && ./gradlew build
 
-FROM bellsoft/liberica-runtime-container:jre-crac-slim as optimizer
+FROM bellsoft/liberica-runtime-container:jre-26-crac-slim as optimizer
 
-COPY --from=builder /app/build/libs/spring-petclinic-3.3.0.jar /app/app.jar
+COPY --from=builder /app/build/libs/spring-petclinic-4.0.0-SNAPSHOT.jar /app/app.jar
 WORKDIR /app
 RUN java -Dspring.context.checkpoint=onRefresh -XX:CRaCCheckpointTo=/checkpoint -jar /app/app.jar
 
-FROM bellsoft/liberica-runtime-container:jre-crac-slim as runner
+FROM bellsoft/liberica-runtime-container:jre-26-crac-slim as runner
 
 ENTRYPOINT java -XX:CRaCRestoreFrom=/checkpoint
 COPY --from=optimizer /app/app.jar /app/app.jar
@@ -778,18 +780,18 @@ Let's try to fix it with arcane magic
 
 ````md magic-move
 ```docker
-FROM bellsoft/liberica-runtime-container:jdk-musl as builder
+FROM bellsoft/liberica-runtime-container:jdk-26-musl as builder
 
 COPY . /app
 RUN cd /app && ./gradlew build -xtest
 
-FROM bellsoft/liberica-runtime-container:jre-crac-slim as optimizer
+FROM bellsoft/liberica-runtime-container:jre-26-crac-slim as optimizer
 
-COPY --from=builder /app/build/libs/spring-petclinic-3.3.0.jar /app/app.jar
+COPY --from=builder /app/build/libs/spring-petclinic-4.0.0-SNAPSHOT.jar /app/app.jar
 WORKDIR /app
 RUN java -Dspring.context.checkpoint=onRefresh -XX:CRaCCheckpointTo=/checkpoint -jar /app/app.jar
 
-FROM bellsoft/liberica-runtime-container:jre-crac-slim as runner
+FROM bellsoft/liberica-runtime-container:jre-26-crac-slim as runner
 
 ENTRYPOINT java -XX:CRaCRestoreFrom=/checkpoint
 COPY --from=optimizer /app/app.jar /app/app.jar
@@ -797,18 +799,18 @@ COPY --from=optimizer /checkpoint /checkpoint
 ```
 ```docker {all|1|11}
 # syntax=docker/dockerfile:1-labs
-FROM bellsoft/liberica-runtime-container:jdk-musl as builder
+FROM bellsoft/liberica-runtime-container:jdk-26-musl as builder
 
 COPY . /app
 RUN cd /app && ./gradlew build -xtest
 
-FROM bellsoft/liberica-runtime-container:jre-crac-slim as optimizer
+FROM bellsoft/liberica-runtime-container:jre-26-crac-slim as optimizer
 
-COPY --from=builder /app/build/libs/spring-petclinic-3.3.0.jar /app/app.jar
+COPY --from=builder /app/build/libs/spring-petclinic-4.0.0-SNAPSHOT.jar /app/app.jar
 WORKDIR /app
 RUN java -Dspring.context.checkpoint=onRefresh -XX:CRaCCheckpointTo=/checkpoint -jar /app/app.jar
 
-FROM bellsoft/liberica-runtime-container:jre-crac-slim as runner
+FROM bellsoft/liberica-runtime-container:jre-26-crac-slim as runner
 
 ENTRYPOINT java -XX:CRaCRestoreFrom=/checkpoint
 COPY --from=optimizer /app/app.jar /app/app.jar
@@ -816,19 +818,19 @@ COPY --from=optimizer /checkpoint /checkpoint
 ```
 ```docker {11,12}
 # syntax=docker/dockerfile:1-labs
-FROM bellsoft/liberica-runtime-container:jdk-musl as builder
+FROM bellsoft/liberica-runtime-container:jdk-26-musl as builder
 
 COPY . /app
 RUN cd /app && ./gradlew build -xtest
 
-FROM bellsoft/liberica-runtime-container:jre-crac-slim as optimizer
+FROM bellsoft/liberica-runtime-container:jre-26-crac-slim as optimizer
 
-COPY --from=builder /app/build/libs/spring-petclinic-3.3.0.jar /app/app.jar
+COPY --from=builder /app/build/libs/spring-petclinic-4.0.0-SNAPSHOT.jar /app/app.jar
 WORKDIR /app
 RUN --security=insecure java -Dspring.context.checkpoint=onRefresh \
   -XX:CRaCCheckpointTo=/checkpoint -jar /app/app.jar
 
-FROM bellsoft/liberica-runtime-container:jre-crac-slim as runner
+FROM bellsoft/liberica-runtime-container:jre-26-crac-slim as runner
 
 ENTRYPOINT java -XX:CRaCRestoreFrom=/checkpoint
 COPY --from=optimizer /app/app.jar /app/app.jar
@@ -836,19 +838,19 @@ COPY --from=optimizer /checkpoint /checkpoint
 ```
 ```docker {11,12}
 # syntax=docker/dockerfile:1-labs
-FROM bellsoft/liberica-runtime-container:jdk-musl as builder
+FROM bellsoft/liberica-runtime-container:jdk-26-musl as builder
 
 COPY . /app
 RUN cd /app && ./gradlew build -xtest
 
-FROM bellsoft/liberica-runtime-container:jre-crac-slim as optimizer
+FROM bellsoft/liberica-runtime-container:jre-26-crac-slim as optimizer
 
-COPY --from=builder /app/build/libs/spring-petclinic-3.3.0.jar /app/app.jar
+COPY --from=builder /app/build/libs/spring-petclinic-4.0.0-SNAPSHOT.jar /app/app.jar
 WORKDIR /app
 RUN --security=insecure java -Dspring.context.checkpoint=onRefresh \
   -XX:CRaCCheckpointTo=/checkpoint -jar /app/app.jar || true
 
-FROM bellsoft/liberica-runtime-container:jre-crac-slim as runner
+FROM bellsoft/liberica-runtime-container:jre-26-crac-slim as runner
 
 ENTRYPOINT java -XX:CRaCRestoreFrom=/checkpoint
 COPY --from=optimizer /app/app.jar /app/app.jar
